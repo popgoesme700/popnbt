@@ -1,0 +1,10 @@
+# VSCode stuff ignores
+.vscode/
+.cache/
+.compilationjsons/
+compile_commands.json
+
+
+# Test unit ignores
+test/build/
+test/mk.sh
