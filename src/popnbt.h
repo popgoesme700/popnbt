@@ -51,8 +51,7 @@ typedef struct poplibs_popnbttoken_coords{
 
 typedef struct poplibs_popnbttoken{
 	union{
-		long int lnum;
-		double dnum;
+		char data[8];
 		poplibs_popnbttokencoords coords;
 	} value;
 	poplibs_popnbttokencoords name;
@@ -63,56 +62,6 @@ POPLIBS_POPNBTAPI void poplibs_popnbtparser_init(poplibs_popnbtparser *parser,co
 POPLIBS_POPNBTAPI unsigned poplibs_popnbtparser_parse(poplibs_popnbtparser *parser,const char *buf,const unsigned bufsize,poplibs_popnbttoken_t *tokens,const unsigned tokensize);
 
 #	ifndef POPLIBS_POPNBTCOMPILED
-
-static poplibs_popnbttoken_t *popnbt_alloctoken(poplibs_popnbtparser *parser,poplibs_popnbttoken_t *tokens,const unsigned tokensize){
-	poplibs_popnbttoken_t *token= POPLIBS_POPNBTNULL;
-	if(parser->nexttok<tokensize){
-		token= &tokens[parser->nexttok++];
-		token->type= poplibs_popnbttype_end;
-		token->name.start= 0;
-		token->name.end= 0;
-		token->value.coords.start= 0;
-		token->value.coords.end= 0;
-		token->value.dnum= 0.0f;
-		token->value.lnum= 0;
-	}else{
-		parser->err= poplibs_popnbterror_nomem;
-	}
-	return token;
-}
-
-static int popnbt_welittleendian(void){
-	short check= 0x0001;
-	char *out= (char*)&check;
-	return out[0];
-}
-
-static short popnbt_finalizeshort(poplibs_popnbtparser *parser,const short input){
-	short rtn= input;
-	if((parser->bigendian && popnbt_welittleendian()) || (!parser->bigendian && !popnbt_welittleendian())){
-		unsigned short nin= input;
-		rtn= (nin>>8 | nin<<8);
-	}
-	return rtn;
-}
-
-static int popnbt_finalizeint(poplibs_popnbtparser *parser,const int input){
-	int rtn= input;
-	if((parser->bigendian && popnbt_welittleendian()) || (!parser->bigendian && !popnbt_welittleendian())){
-		unsigned int nin= input;
-		rtn= (nin>>24) | ((nin<<8) & ((unsigned int) 0x00FF0000U)) | ((nin>>8) & ((unsigned int) 0x0000FF00U)) | (nin<<24);
-	}
-	return rtn;
-}
-
-static long int popnbt_finalizelong(poplibs_popnbtparser *parser,const long int input){
-	long int rtn= input;
-	if((parser->bigendian && popnbt_welittleendian()) || (!parser->bigendian && !popnbt_welittleendian())){
-		unsigned long int nin= input;
-		rtn= (nin>>56) | ((nin<<40) & ((unsigned long int) 0x00FF000000000000UL)) | ((nin<<24) & ((unsigned long int) 0x0000FF0000000000UL)) | ((nin<<8) & ((unsigned long int) 0x000000FF00000000UL)) | ((nin>>8) & ((unsigned long int) 0x00000000FF000000UL)) | ((nin>>24) & ((unsigned long int) 0x0000000000FF0000UL)) | ((nin>>40) & ((unsigned long int) 0x000000000000FF00UL)) | (nin<<56);
-	}
-	return rtn;
-}
 
 static void *popnbt_memcpy(void *dest,const void *src,const unsigned bytes){
 	if(dest!=POPLIBS_POPNBTNULL && src!=POPLIBS_POPNBTNULL){
@@ -126,13 +75,89 @@ static void *popnbt_memcpy(void *dest,const void *src,const unsigned bytes){
 	return dest;
 }
 
+static void *popnbt_memset(void *dest,const int set,const unsigned bytes){
+	if(dest!=POPLIBS_POPNBTNULL){
+		char *destbyt= (char*)dest;
+		unsigned i;
+		for(i=0;i<bytes;i++){
+			destbyt[i]= set;
+		}
+	}
+	return dest;
+}
+
+static poplibs_popnbttoken_t *popnbt_alloctoken(poplibs_popnbtparser *parser,poplibs_popnbttoken_t *tokens,const unsigned tokensize){
+	poplibs_popnbttoken_t *token= POPLIBS_POPNBTNULL;
+	if(parser->nexttok<tokensize){
+		token= &tokens[parser->nexttok++];
+		token->type= poplibs_popnbttype_end;
+		token->name.start= 0;
+		token->name.end= 0;
+		token->value.coords.start= 0;
+		token->value.coords.end= 0;
+		popnbt_memset(token->value.data,0,8);
+	}else{
+		parser->err= poplibs_popnbterror_nomem;
+	}
+	return token;
+}
+
+static int popnbt_welittleendian(void){
+	short check= 0x0001;
+	char *out= (char*)&check;
+	return out[0];
+}
+
+static void popnbt_finalizedata(poplibs_popnbtparser *parser,void *inp,const int bytes){
+	char *input= inp;
+	if((parser->bigendian && popnbt_welittleendian()) || (!parser->bigendian && !popnbt_welittleendian())){
+		char swp[7];
+		switch(bytes){
+			case 2:
+				swp[0]= input[0];
+				input[0]= input[1];
+				input[1]= swp[0];
+				break;
+			case 4:
+				swp[0]= input[0];
+				swp[1]= input[1];
+				swp[2]= input[2];
+				input[0]= input[3];
+				input[1]= swp[2];
+				input[2]= swp[1];
+				input[3]= swp[0];
+				break;
+			case 8:
+				swp[0]= input[0];
+				swp[1]= input[1];
+				swp[2]= input[2];
+				swp[3]= input[3];
+				swp[4]= input[4];
+				swp[5]= input[5];
+				swp[6]= input[6];
+				input[0]= input[7];
+				input[1]= swp[6];
+				input[2]= swp[5];
+				input[3]= swp[4];
+				input[4]= swp[3];
+				input[5]= swp[2];
+				input[6]= swp[1];
+				input[7]= swp[0];
+				break;
+			default:
+				break;
+		}
+	}
+	return;
+}
+
 static void popnbt_applytokname(poplibs_popnbtparser *parser,const char *buf,const unsigned bufsize,poplibs_popnbttoken_t *token){
 	if(parser!=POPLIBS_POPNBTNULL){
 		if(parser->pos+2<bufsize){
-			unsigned short strLen;
+			unsigned int strLen= 0;
 			parser->pos++;
 			popnbt_memcpy(&strLen,&buf[parser->pos],2);
-			strLen= popnbt_finalizeshort(parser,strLen);
+			popnbt_finalizedata(parser,&strLen,2);
 			parser->pos++;
 			if(strLen>0){
 				if(parser->pos+(strLen)<bufsize){
@@ -172,7 +197,7 @@ static void popnbt_grabtoken(poplibs_popnbtparser *parser,const char *buf,const 
 					parser->pos++;
 					if(token!=POPLIBS_POPNBTNULL){
 						token->type= cuf;
-						token->value.lnum= buf[parser->pos];
+						token->value.data[0]= buf[parser->pos];
 					}
 				}else{
 					if(parser->err==poplibs_popnbterror_none){
@@ -189,14 +214,14 @@ static void popnbt_grabtoken(poplibs_popnbtparser *parser,const char *buf,const 
 					popnbt_applytokname(parser,buf,bufsize,token);
 				}
 				if(parser->err==poplibs_popnbterror_none && parser->pos+2<bufsize){
-					short val;
+					char val[2];
 					parser->pos++;
-					popnbt_memcpy(&val,&buf[parser->pos],2);
+					popnbt_memcpy(val,&buf[parser->pos],2);
 					parser->pos++;
-					val= popnbt_finalizeshort(parser,val);
+					popnbt_finalizedata(parser,&val,2);
 					if(token!=POPLIBS_POPNBTNULL){
 						token->type= cuf;
-						token->value.lnum= val;
+						popnbt_memcpy(token->value.data,val,2);
 					}
 				}else{
 					if(parser->err==poplibs_popnbterror_none){
@@ -213,14 +238,14 @@ static void popnbt_grabtoken(poplibs_popnbtparser *parser,const char *buf,const 
 					popnbt_applytokname(parser,buf,bufsize,token);
 				}
 				if(parser->err==poplibs_popnbterror_none && parser->pos+4<bufsize){
-					int val;
+					char val[4];
 					parser->pos++;
-					popnbt_memcpy(&val,&buf[parser->pos],4);
+					popnbt_memcpy(val,&buf[parser->pos],4);
 					parser->pos+= 3;
-					val= popnbt_finalizeint(parser,val);
+					popnbt_finalizedata(parser,&val,4);
 					if(token!=POPLIBS_POPNBTNULL){
 						token->type= cuf;
-						token->value.lnum= val;
+						popnbt_memcpy(token->value.data,val,4);
 					}
 				}else{
 					if(parser->err==poplibs_popnbterror_none){
@@ -237,14 +262,14 @@ static void popnbt_grabtoken(poplibs_popnbtparser *parser,const char *buf,const 
 					popnbt_applytokname(parser,buf,bufsize,token);
 				}
 				if(parser->err==poplibs_popnbterror_none && parser->pos+8<bufsize){
-					long int val;
+					char val[8];
 					parser->pos++;
-					popnbt_memcpy(&val,&buf[parser->pos],8);
+					popnbt_memcpy(val,&buf[parser->pos],8);
 					parser->pos+= 7;
-					val= popnbt_finalizelong(parser,val);
+					popnbt_finalizedata(parser,&val,8);
 					if(token!=POPLIBS_POPNBTNULL){
 						token->type= cuf;
-						token->value.lnum= val;
+						popnbt_memcpy(token->value.data,val,8);
 					}
 				}else{
 					if(parser->err==poplibs_popnbterror_none){
@@ -261,14 +286,14 @@ static void popnbt_grabtoken(poplibs_popnbtparser *parser,const char *buf,const 
 					popnbt_applytokname(parser,buf,bufsize,token);
 				}
 				if(parser->err==poplibs_popnbterror_none && parser->pos+4<bufsize){
-					float val;
+					char val[4];
 					parser->pos++;
-					popnbt_memcpy(&val,&buf[parser->pos],4);
+					popnbt_memcpy(val,&buf[parser->pos],4);
 					parser->pos+= 3;
-					val= popnbt_finalizeint(parser,val);
+					popnbt_finalizedata(parser,&val,4);
 					if(token!=POPLIBS_POPNBTNULL){
 						token->type= cuf;
-						token->value.dnum= val;
+						popnbt_memcpy(token->value.data,val,4);
 					}
 				}else{
 					if(parser->err==poplibs_popnbterror_none){
@@ -285,14 +310,14 @@ static void popnbt_grabtoken(poplibs_popnbtparser *parser,const char *buf,const 
 					popnbt_applytokname(parser,buf,bufsize,token);
 				}
 				if(parser->err==poplibs_popnbterror_none && parser->pos+8<bufsize){
-					double val;
+					char val[8];
 					parser->pos++;
-					popnbt_memcpy(&val,&buf[parser->pos],8);
+					popnbt_memcpy(val,&buf[parser->pos],8);
 					parser->pos+= 7;
-					val= popnbt_finalizelong(parser,val);
+					popnbt_finalizedata(parser,&val,8);
 					if(token!=POPLIBS_POPNBTNULL){
 						token->type= cuf;
-						token->value.dnum= val;
+						popnbt_memcpy(token->value.data,val,8);
 					}
 				}else{
 					if(parser->err==poplibs_popnbterror_none){
@@ -309,11 +334,11 @@ static void popnbt_grabtoken(poplibs_popnbtparser *parser,const char *buf,const 
 					popnbt_applytokname(parser,buf,bufsize,token);
 				}
 				if(parser->err==poplibs_popnbterror_none && parser->pos+4<bufsize){
-					int val;
+					long val;
 					parser->pos++;
-					popnbt_memcpy(&val,&buf[parser->pos],4);
+					popnbt_memcpy(&long,&buf[parser->pos],4);
 					parser->pos+= 3;
-					val= popnbt_finalizeint(parser,val);
+					popnbt_finalizedata(parser,&val,4);
 					if(val>0){
 						if(parser->pos+(val)<bufsize){
 							unsigned start;
@@ -342,11 +367,11 @@ static void popnbt_grabtoken(poplibs_popnbtparser *parser,const char *buf,const 
 					popnbt_applytokname(parser,buf,bufsize,token);
 				}
 				if(parser->err==poplibs_popnbterror_none && parser->pos+2<bufsize){
-					unsigned short val;
+					unsigned int val;
 					parser->pos++;
 					popnbt_memcpy(&val,&buf[parser->pos],2);
 					parser->pos++;
-					val= popnbt_finalizeshort(parser,val);
+					popnbt_finalizedata(parser,&val,2);
 					if(val>0){
 						if(parser->pos+(val)<bufsize){
 							unsigned start;
@@ -379,11 +404,11 @@ static void popnbt_grabtoken(poplibs_popnbtparser *parser,const char *buf,const 
 					parser->pos++;
 					ltype=  buf[parser->pos];
 					if(parser->pos+4<bufsize){
-						int val;
+						long val;
 						parser->pos++;
 						popnbt_memcpy(&val,&buf[parser->pos],4);
 						parser->pos+= 3;
-						val= popnbt_finalizeint(parser,val);
+						popnbt_finalizedata(parser,&val,4);
 						if(val>0){
 							if(ltype!=poplibs_popnbttype_end){
 								unsigned i;
@@ -462,11 +487,11 @@ static void popnbt_grabtoken(poplibs_popnbtparser *parser,const char *buf,const 
 					popnbt_applytokname(parser,buf,bufsize,token);
 				}
 				if(parser->err==poplibs_popnbterror_none && parser->pos+4<bufsize){
-					int val;
+					long val;
 					parser->pos++;
 					popnbt_memcpy(&val,&buf[parser->pos],4);
 					parser->pos+= 3;
-					val= popnbt_finalizeint(parser,val);
+					popnbt_finalizedata(parser,&val,4);
 					if(val>0){
 						if(parser->pos+(val*4)<bufsize){
 							unsigned start;
@@ -495,11 +520,11 @@ static void popnbt_grabtoken(poplibs_popnbtparser *parser,const char *buf,const 
 					popnbt_applytokname(parser,buf,bufsize,token);
 				}
 				if(parser->err==poplibs_popnbterror_none && parser->pos+4<bufsize){
-					int val;
+					long val;
 					parser->pos++;
 					popnbt_memcpy(&val,&buf[parser->pos],4);
 					parser->pos+= 3;
-					val= popnbt_finalizeint(parser,val);
+					popnbt_finalizedata(parser,&val,4);
 					if(val>0){
 						if(parser->pos+(val*8)<bufsize){
 							unsigned start;
