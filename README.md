@@ -1,5 +1,5 @@
 # popnbt
-A C NBT Tag parser. Exports NBT Tags as tokens, with arrays/strings having their start and end offset in the NBT data. On the lines of `popini` and `jsmn`.
+A C NBT Tag parser. Exports NBT Tags as tokens, with arrays/strings having their start and end offset in the NBT data. On the lines of [popini](https://github.com/popgoesme700/popini) and [jsmn](https://github.com/zserge/jsmn).
 ## Using the library in your own projects.
 Everytime you include `popnbt.h` which is the only file needed for using popnbt, you compile the library... due to this, its best practice to toss `popnbt.h` into a C file specifically for it, like `popnbt.c`. Afterwards, every inclusion of `popnbt.h` should has the line `#define POPLIBS_POPNBTCOMPILED` before the inclusion. If you want to compile popnbt for every C file that includes it, add this line `#define POPLIBS_POPNBT_STATIC` before including `popnbt.h`, this will compile all symbols of `popnbt.h` as static, meaning only the file including `popnbt.h` will have access to the symbols of `popnbt.h` that are "compiled"
 ## Some useful knowledge.
