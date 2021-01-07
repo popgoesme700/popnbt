@@ -36,13 +36,14 @@ This structure stores coordinate data that leads to positions in the NBT data to
 typedef struct poplibs_popnbttoken{
 	union{
 		char data[8];
+		long items;
 		poplibs_popnbttokencoords coords;
 	} value;
 	poplibs_popnbttokencoords name;
 	enum poplibs_popnbttype type;
 } poplibs_popnbttoken_t;
 ```
-This structure stores a NBT token. This token has a key `value` which stores the data this NBT token may hold, the `data` key stores the bytes of the data... if it is an int or float, itll store 4 bytes, if it is a double or long, itll store 8 bytes, if it is a short itll store 2 bytes, and if it is a byte... itll store a byte. Keep in mind, the data is already in the correct endian for the host, and that floats and doubles are based on IEEE-754 standard, float being the 32-bit floating point, and the double being the 64-bit floating point, Read more about it on this [wiki.vg page](https://wiki.vg/NBT) which states the NBT format in its full. Best bet for all integer numbers would to do a simple `memcpy` into the variable that fits their minimum byte size. For the floats and doubles, you may need to check if the host device supports IEEE-754 standard of floating-point numbers, search the internet for how to do this. The the `coords` key stores a `poplibs_popnbttokencoords` structure, which contains the start and end positions that a byte array, string, int array, and long array have their value/data contained in, your job would be to grab those specific bytes from the NBT data.
+This structure stores a NBT token. This token has a key `value` which stores the data this NBT token may hold, the `data` key stores the bytes of the data... if it is an int or float, itll store 4 bytes, if it is a double or long, itll store 8 bytes, if it is a short itll store 2 bytes, and if it is a byte... itll store a byte. Keep in mind, the data is already in the correct endian for the host, and that floats and doubles are based on IEEE-754 standard, float being the 32-bit floating point, and the double being the 64-bit floating point, Read more about it on this [wiki.vg page](https://wiki.vg/NBT) which states the NBT format in its full. Best bet for all integer numbers would to do a simple `memcpy` into the variable that fits their minimum byte size. For the floats and doubles, you may need to check if the host device supports IEEE-754 standard of floating-point numbers, search the internet for how to do this. The `items` key stores the amount of tokens are in the list or compound. The `coords` key stores a `poplibs_popnbttokencoords` structure, which contains the start and end positions that a byte array, string, int array, and long array have their value/data contained in, your job would be to grab those specific bytes from the NBT data.
 ### Enums.
 ```c
 enum poplibs_popnbterror{

@@ -52,6 +52,7 @@ typedef struct poplibs_popnbttoken_coords{
 typedef struct poplibs_popnbttoken{
 	union{
 		char data[8];
+		long items;
 		poplibs_popnbttokencoords coords;
 	} value;
 	poplibs_popnbttokencoords name;
@@ -96,6 +97,7 @@ static poplibs_popnbttoken_t *popnbt_alloctoken(poplibs_popnbtparser *parser,pop
 		token->value.coords.start= 0;
 		token->value.coords.end= 0;
 		popnbt_memset(token->value.data,0,8);
+		token->value.items= 0;
 	}else{
 		parser->err= poplibs_popnbterror_nomem;
 	}
@@ -336,7 +338,7 @@ static void popnbt_grabtoken(poplibs_popnbtparser *parser,const char *buf,const 
 				if(parser->err==poplibs_popnbterror_none && parser->pos+4<bufsize){
 					long val;
 					parser->pos++;
-					popnbt_memcpy(&long,&buf[parser->pos],4);
+					popnbt_memcpy(&val,&buf[parser->pos],4);
 					parser->pos+= 3;
 					popnbt_finalizedata(parser,&val,4);
 					if(val>0){
@@ -433,7 +435,7 @@ static void popnbt_grabtoken(poplibs_popnbtparser *parser,const char *buf,const 
 						}
 						if(token!=POPLIBS_POPNBTNULL){
 							token->type= cuf;
-							token->value.lnum= val;
+							token->value.items= val;
 						}
 					}
 				}else{
@@ -470,7 +472,7 @@ static void popnbt_grabtoken(poplibs_popnbtparser *parser,const char *buf,const 
 					parser->pos--;
 					if(token!=POPLIBS_POPNBTNULL){
 						token->type= cuf;
-						token->value.lnum= i;
+						token->value.items= i;
 					}
 				}else{
 					if(parser->err==poplibs_popnbterror_none){
