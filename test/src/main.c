@@ -10,8 +10,5 @@ int main(const int argc,const char *argv[]){
 	poplibs_popnbtparser parser;
 	poplibs_popnbttoken_t tokens[64];
 	unsigned made;
-	poplibs_popnbtparser_init(&parser,0);
-	made= poplibs_popnbtparser_parse(&parser,data,26,tokens,64);
-	printf("Made %u tokens.\n",made);
 	return 0;
 }
