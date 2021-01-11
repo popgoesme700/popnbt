@@ -14,10 +14,12 @@
 #	endif
 
 enum poplibs_popnbterror{
+	poplibs_popnbterror_endtok= 1,
 	poplibs_popnbterror_none=0,
 	poplibs_popnbterror_part= -1,
 	poplibs_popnbterror_nomem= -2,
-	poplibs_popnbterror_badid= -3
+	poplibs_popnbterror_badid= -3,
+	poplibs_popnbterror_nostack= -4
 };
 
 enum poplibs_popnbttype{
@@ -36,83 +38,117 @@ enum poplibs_popnbttype{
 	poplibs_popnbttype_longarr=12
 };
 
-typedef struct poplibs_popnbt_parser{
-	enum poplibs_popnbterror err;
-	unsigned pos;
-	unsigned errPos;
-	unsigned nexttok;
-	int bigendian;
-} poplibs_popnbtparser;
-
 typedef struct poplibs_popnbttoken_coords{
 	unsigned start;
 	unsigned end;
 } poplibs_popnbttokencoords;
 
+typedef struct poplibs_popnbttoken_list{
+	unsigned long items;
+	enum poplibs_popnbttype type;
+} poplibs_popnbttokenlist;
+
+typedef struct poplibs_popnbt_stack{
+	enum poplibs_popnbttype type;
+	unsigned id;
+	unsigned count;
+} poplibs_popnbtstack;
+
 typedef struct poplibs_popnbttoken{
 	union{
 		char data[8];
-		long items;
+		unsigned long items;
+		poplibs_popnbttokenlist list;
 		poplibs_popnbttokencoords coords;
 	} value;
 	poplibs_popnbttokencoords name;
 	enum poplibs_popnbttype type;
 } poplibs_popnbttoken_t;
 
-POPLIBS_POPNBTAPI void poplibs_popnbtparser_init(poplibs_popnbtparser *parser,const int bigendian);
-POPLIBS_POPNBTAPI unsigned poplibs_popnbtparser_parse(poplibs_popnbtparser *parser,const char *buf,const unsigned bufsize,poplibs_popnbttoken_t *tokens,const unsigned tokensize);
+typedef struct poplibs_popnbt_parser{
+	poplibs_popnbtstack *stack;
+	poplibs_popnbttoken_t *tokens;
+	enum poplibs_popnbterror err;
+	unsigned stacksize;
+	unsigned toksize;
+	int nextstack;
+	unsigned nexttok;
+	unsigned pos;
+	unsigned errPos;
+	int bigendian;
+} poplibs_popnbtparser;
+
+POPLIBS_POPNBTAPI void poplibs_popnbtparser_init(poplibs_popnbtparser *parser,const int bigendian,poplibs_popnbtstack *stack,const unsigned stacksize,poplibs_popnbttoken_t *tokens,const unsigned tokensize);
+POPLIBS_POPNBTAPI unsigned poplibs_popnbtparser_parse(poplibs_popnbtparser *parser,const void *vbuf,const unsigned bufsize);
+POPLIBS_POPNBTAPI poplibs_popnbttoken_t *poplibs_popnbtparser_parsetoken(poplibs_popnbtparser *parser,const void *vbuf,const unsigned bufsize);
+POPLIBS_POPNBTAPI void poplibs_popnbtparser_updatestack(poplibs_popnbtparser *parser,poplibs_popnbtstack *stack,const unsigned stacksize);
+POPLIBS_POPNBTAPI void poplibs_popnbtparser_updatetokens(poplibs_popnbtparser *parser,poplibs_popnbttoken_t *tokens,const unsigned tokensize);
 
 #	ifndef POPLIBS_POPNBTCOMPILED
 
+static void *popnbt_memset(void *dest,const char set,const unsigned bytes){
+	unsigned i;
+	char *destbyt= (char*)dest;
+	for(i=0;i<bytes;i++){
+		destbyt[i]= set;
+	}
+	return dest;
+}
+
 static void *popnbt_memcpy(void *dest,const void *src,const unsigned bytes){
-	if(dest!=POPLIBS_POPNBTNULL && src!=POPLIBS_POPNBTNULL){
-		char *destbyt= (char*)dest;
-		char *srcbyt= (char*)src;
-		unsigned i;
-		for(i=0;i<bytes;i++){
-			destbyt[i]= srcbyt[i];
-		}
+	unsigned i;
+	char *destbyt= (char*)dest;
+	const char *srcbyt= (char*)src;
+	for(i=0;i<bytes;i++){
+		destbyt[i]= srcbyt[i];
 	}
 	return dest;
 }
 
-static void *popnbt_memset(void *dest,const int set,const unsigned bytes){
-	if(dest!=POPLIBS_POPNBTNULL){
-		char *destbyt= (char*)dest;
-		unsigned i;
-		for(i=0;i<bytes;i++){
-			destbyt[i]= set;
-		}
-	}
-	return dest;
+static poplibs_popnbtstack *popnbt_stackpeek(const poplibs_popnbtparser *parser,const unsigned pos){
+	return &parser->stack[parser->nextstack-pos];
 }
 
-static poplibs_popnbttoken_t *popnbt_alloctoken(poplibs_popnbtparser *parser,poplibs_popnbttoken_t *tokens,const unsigned tokensize){
-	poplibs_popnbttoken_t *token= (poplibs_popnbttoken_t*)POPLIBS_POPNBTNULL;
-	if(parser->nexttok<tokensize){
-		token= &tokens[parser->nexttok++];
-		token->type= poplibs_popnbttype_end;
-		token->name.start= 0;
-		token->name.end= 0;
-		token->value.coords.start= 0;
-		token->value.coords.end= 0;
-		popnbt_memset(token->value.data,0,8);
-		token->value.items= 0;
-	}else{
-		parser->err= poplibs_popnbterror_nomem;
-	}
-	return token;
+static poplibs_popnbtstack *popnbt_stackpop(poplibs_popnbtparser *parser){
+	return &parser->stack[parser->nextstack--];
 }
 
-static int popnbt_welittleendian(void){
+static poplibs_popnbtstack *popnbt_stackpush(poplibs_popnbtparser *parser,enum poplibs_popnbttype type,const unsigned id,const unsigned val){
+	poplibs_popnbtstack *sitem;
+	parser->nextstack++;
+	sitem= &parser->stack[parser->nextstack];
+	sitem->type= type;
+	sitem->id= id;
+	sitem->count= val;
+	return sitem;
+}
+
+static poplibs_popnbttoken_t *popnbt_alloctoken(poplibs_popnbtparser *parser){
+	poplibs_popnbttoken_t *rtn= POPLIBS_POPNBTNULL;
+	if(parser->nexttok<parser->toksize && parser->tokens!=POPLIBS_POPNBTNULL){
+		rtn= &parser->tokens[parser->nexttok++];
+		rtn->type= poplibs_popnbttype_end;
+		rtn->name.start= 0;
+		rtn->name.end= 0;
+		popnbt_memset(rtn->value.data,0,8);
+		rtn->value.items= 0;
+		rtn->value.list.items= 0;
+		rtn->value.list.type= poplibs_popnbttype_end;
+		rtn->value.coords.start= 0;
+		rtn->value.coords.end= 0;
+	}
+	return rtn;
+}
+
+static int popnbt_islittleendian(void){
 	short check= 0x0001;
 	char *out= (char*)&check;
 	return out[0];
 }
 
-static void popnbt_finalizedata(poplibs_popnbtparser *parser,void *inp,const int bytes){
+static void popnbt_finalizedata(poplibs_popnbtparser *parser,void *inp,const unsigned bytes){
 	char *input= (char*)inp;
-	if((parser->bigendian && popnbt_welittleendian()) || (!parser->bigendian && !popnbt_welittleendian())){
+	if((parser->bigendian && popnbt_islittleendian()) || (!parser->bigendian && !popnbt_islittleendian())){
 		char swp[7];
 		switch(bytes){
 			case 2:
@@ -146,443 +182,447 @@ static void popnbt_finalizedata(poplibs_popnbtparser *parser,void *inp,const int
 				input[6]= swp[1];
 				input[7]= swp[0];
 				break;
-			default:
-				break;
 		}
 	}
 	return;
 }
 
-static void popnbt_applytokname(poplibs_popnbtparser *parser,const char *buf,const unsigned bufsize,poplibs_popnbttoken_t *token){
-	if(parser!=POPLIBS_POPNBTNULL){
-		if(parser->pos+2<bufsize){
-			unsigned int strLen= 0;
-			parser->pos++;
-			popnbt_memcpy(&strLen,&buf[parser->pos],2);
-			popnbt_finalizedata(parser,&strLen,2);
-			parser->pos++;
-			if(strLen>0){
-				if(parser->pos+(strLen)<bufsize){
-					unsigned start;
-					parser->pos++;
-					start= parser->pos;
-					parser->pos+= (strLen-1);
-					if(token!=POPLIBS_POPNBTNULL){
-						token->name.start= start;
-						token->name.end= parser->pos;
+static void popnbt_applytokname(poplibs_popnbtparser *parser,const void *vbuf,const unsigned bufsize,poplibs_popnbttoken_t *token){
+	char *buf= (char*)vbuf;
+	if(parser->pos+2<bufsize){
+		unsigned short strLen= 0;
+		popnbt_memcpy(&strLen,&buf[parser->pos],2);
+		popnbt_finalizedata(parser,&strLen,2);
+		parser->pos+= 2;
+		if(strLen>0){
+			if(parser->pos+(strLen)<bufsize){
+				unsigned start= parser->pos;
+				parser->pos+= (strLen);
+				if(token!=POPLIBS_POPNBTNULL){
+					token->name.start= start;
+					token->name.end= parser->pos-1;
+				}
+			}else{
+				parser->err= poplibs_popnbterror_part;
+			}
+		}else if(token!=POPLIBS_POPNBTNULL){
+			token->name.start= parser->pos;
+			token->name.end= parser->pos-1;
+		}
+	}else{
+		parser->err= poplibs_popnbterror_part;
+	}
+	return;
+}
+
+POPLIBS_POPNBTAPI poplibs_popnbttoken_t *poplibs_popnbtparser_parsetoken(poplibs_popnbtparser *parser,const void *vbuf,const unsigned bufsize){
+	char *buf= (char*)vbuf;
+	unsigned start= parser->pos;
+	int getName= 0;
+	poplibs_popnbttoken_t *rtn= POPLIBS_POPNBTNULL;
+	enum poplibs_popnbttype typ= buf[parser->pos++];
+	poplibs_popnbtstack *sitem= POPLIBS_POPNBTNULL;
+	
+	parser->err= poplibs_popnbterror_none;
+	if(parser->stack!=POPLIBS_POPNBTNULL){
+		if(parser->tokens!=POPLIBS_POPNBTNULL){
+			while(parser->nextstack>=0){
+				poplibs_popnbtstack *sitem= popnbt_stackpop(parser);
+				poplibs_popnbttoken_t *stok= &parser->tokens[sitem->id];
+				if(stok->type==poplibs_popnbttype_compound){
+					if(typ==poplibs_popnbttype_end){
+						parser->err= poplibs_popnbterror_endtok;
+						parser->errPos= parser->pos-1;
+						rtn= stok;
+						break;
 					}else{
-						parser->err= poplibs_popnbterror_part;
+						popnbt_stackpush(parser,sitem->type,sitem->id,sitem->count);
+						getName|= 1;
+						break;
+					}
+				}else{
+					if(typ==stok->value.list.type && (parser->nexttok-1)-sitem->id<stok->value.list.items){
+						popnbt_stackpush(parser,sitem->type,sitem->id,sitem->count);
+						break;
 					}
 				}
+			}
+			if(parser->err==poplibs_popnbterror_none){
+				getName|= 2;
 			}
 		}else{
-			parser->err= poplibs_popnbterror_part;
+			while(parser->nextstack>=0){
+				poplibs_popnbtstack *sitem= popnbt_stackpop(parser);
+				if(sitem->id==0){
+					if(typ==poplibs_popnbttype_end){
+						parser->err= poplibs_popnbterror_endtok;
+						parser->errPos= parser->pos;
+						break;
+					}else{
+						popnbt_stackpush(parser,sitem->type,sitem->id,sitem->count);
+						getName|= 1;
+						break;
+					}
+				}else{
+					if(sitem->type==typ && sitem->count>0){
+						popnbt_stackpush(parser,sitem->type,sitem->id,sitem->count);
+						break;
+					}
+				}
+			}
+			if(parser->err==poplibs_popnbterror_none){
+				getName|= 2;
+			}
 		}
+	}else{
+		getName|= 2;
 	}
-	return;
-}
-
-static void popnbt_grabtoken(poplibs_popnbtparser *parser,const char *buf,const unsigned bufsize,poplibs_popnbttoken_t *tokens,const unsigned tokensize,unsigned *made,const int incompound);
-static void popnbt_grabtoken(poplibs_popnbtparser *parser,const char *buf,const unsigned bufsize,poplibs_popnbttoken_t *tokens,const unsigned tokensize,unsigned *made,const int incompound){
-	char cuf= buf[parser->pos];
-	unsigned start= parser->pos;
-	unsigned mTok= 0;
-	poplibs_popnbttoken_t *token;
-	switch(cuf){
-		case poplibs_popnbttype_byte:
-			if((token= popnbt_alloctoken(parser,tokens,tokensize))!=POPLIBS_POPNBTNULL){
-				mTok++;
-				if(incompound){
-					popnbt_applytokname(parser,buf,bufsize,token);
-				}
-				if(parser->err==poplibs_popnbterror_none && parser->pos+1<bufsize){
-					parser->pos++;
-					if(token!=POPLIBS_POPNBTNULL){
-						token->type= (enum poplibs_popnbttype)cuf;
-						token->value.data[0]= buf[parser->pos];
-					}
-				}else{
-					if(parser->err==poplibs_popnbterror_none){
-						parser->err= poplibs_popnbterror_part;
-					}
-					parser->nexttok-= mTok;
-				}
+	if(getName&2){
+		if((typ!=poplibs_popnbttype_compound && typ!=poplibs_popnbttype_list) || parser->stack!=POPLIBS_POPNBTNULL && (int)parser->nextstack<(int)parser->stacksize){
+			poplibs_popnbttoken_t *tok= popnbt_alloctoken(parser);
+			poplibs_popnbtstack *sitem= POPLIBS_POPNBTNULL;
+			if(parser->stack!=POPLIBS_POPNBTNULL && parser->nextstack>=0){
+				sitem= popnbt_stackpeek(parser,0);
 			}
-			break;
-		case poplibs_popnbttype_short:
-			if((token= popnbt_alloctoken(parser,tokens,tokensize))!=POPLIBS_POPNBTNULL){
-				mTok++;
-				if(incompound){
-					popnbt_applytokname(parser,buf,bufsize,token);
-				}
-				if(parser->err==poplibs_popnbterror_none && parser->pos+2<bufsize){
-					char val[2];
-					parser->pos++;
-					popnbt_memcpy(val,&buf[parser->pos],2);
-					parser->pos++;
-					popnbt_finalizedata(parser,&val,2);
-					if(token!=POPLIBS_POPNBTNULL){
-						token->type= (enum poplibs_popnbttype)cuf;
-						popnbt_memcpy(token->value.data,val,2);
-					}
-				}else{
-					if(parser->err==poplibs_popnbterror_none){
-						parser->err= poplibs_popnbterror_part;
-					}
-					parser->nexttok-= mTok;
-				}
+			if(tok==POPLIBS_POPNBTNULL && parser->tokens!=POPLIBS_POPNBTNULL){
+				parser->err= poplibs_popnbterror_nomem;
+				parser->errPos= parser->pos-1;
+				parser->pos= start;
+				return rtn;
 			}
-			break;
-		case poplibs_popnbttype_int:
-			if((token= popnbt_alloctoken(parser,tokens,tokensize))!=POPLIBS_POPNBTNULL){
-				mTok++;
-				if(incompound){
-					popnbt_applytokname(parser,buf,bufsize,token);
-				}
-				if(parser->err==poplibs_popnbterror_none && parser->pos+4<bufsize){
-					char val[4];
-					parser->pos++;
-					popnbt_memcpy(val,&buf[parser->pos],4);
-					parser->pos+= 3;
-					popnbt_finalizedata(parser,&val,4);
-					if(token!=POPLIBS_POPNBTNULL){
-						token->type= (enum poplibs_popnbttype)cuf;
-						popnbt_memcpy(token->value.data,val,4);
-					}
-				}else{
-					if(parser->err==poplibs_popnbterror_none){
-						parser->err= poplibs_popnbterror_part;
-					}
-					parser->nexttok-= mTok;
-				}
+			if(getName&1 || typ==poplibs_popnbttype_compound){
+				popnbt_applytokname(parser,buf,bufsize,tok);
 			}
-			break;
-		case poplibs_popnbttype_long:
-			if((token= popnbt_alloctoken(parser,tokens,tokensize))!=POPLIBS_POPNBTNULL){
-				mTok++;
-				if(incompound){
-					popnbt_applytokname(parser,buf,bufsize,token);
-				}
-				if(parser->err==poplibs_popnbterror_none && parser->pos+8<bufsize){
-					char val[8];
-					parser->pos++;
-					popnbt_memcpy(val,&buf[parser->pos],8);
-					parser->pos+= 7;
-					popnbt_finalizedata(parser,&val,8);
-					if(token!=POPLIBS_POPNBTNULL){
-						token->type= (enum poplibs_popnbttype)cuf;
-						popnbt_memcpy(token->value.data,val,8);
-					}
-				}else{
-					if(parser->err==poplibs_popnbterror_none){
-						parser->err= poplibs_popnbterror_part;
-					}
-					parser->nexttok-= mTok;
-				}
-			}
-			break;
-		case poplibs_popnbttype_float:
-			if((token= popnbt_alloctoken(parser,tokens,tokensize))!=POPLIBS_POPNBTNULL){
-				mTok++;
-				if(incompound){
-					popnbt_applytokname(parser,buf,bufsize,token);
-				}
-				if(parser->err==poplibs_popnbterror_none && parser->pos+4<bufsize){
-					char val[4];
-					parser->pos++;
-					popnbt_memcpy(val,&buf[parser->pos],4);
-					parser->pos+= 3;
-					popnbt_finalizedata(parser,&val,4);
-					if(token!=POPLIBS_POPNBTNULL){
-						token->type= (enum poplibs_popnbttype)cuf;
-						popnbt_memcpy(token->value.data,val,4);
-					}
-				}else{
-					if(parser->err==poplibs_popnbterror_none){
-						parser->err= poplibs_popnbterror_part;
-					}
-					parser->nexttok-= mTok;
-				}
-			}
-			break;
-		case poplibs_popnbttype_double:
-			if((token= popnbt_alloctoken(parser,tokens,tokensize))!=POPLIBS_POPNBTNULL){
-				mTok++;
-				if(incompound){
-					popnbt_applytokname(parser,buf,bufsize,token);
-				}
-				if(parser->err==poplibs_popnbterror_none && parser->pos+8<bufsize){
-					char val[8];
-					parser->pos++;
-					popnbt_memcpy(val,&buf[parser->pos],8);
-					parser->pos+= 7;
-					popnbt_finalizedata(parser,&val,8);
-					if(token!=POPLIBS_POPNBTNULL){
-						token->type= (enum poplibs_popnbttype)cuf;
-						popnbt_memcpy(token->value.data,val,8);
-					}
-				}else{
-					if(parser->err==poplibs_popnbterror_none){
-						parser->err= poplibs_popnbterror_part;
-					}
-					parser->nexttok-= mTok;
-				}
-			}
-			break;
-		case poplibs_popnbttype_bytearr:
-			if((token= popnbt_alloctoken(parser,tokens,tokensize))!=POPLIBS_POPNBTNULL){
-				mTok++;
-				if(incompound){
-					popnbt_applytokname(parser,buf,bufsize,token);
-				}
-				if(parser->err==poplibs_popnbterror_none && parser->pos+4<bufsize){
-					long val;
-					parser->pos++;
-					popnbt_memcpy(&val,&buf[parser->pos],4);
-					parser->pos+= 3;
-					popnbt_finalizedata(parser,&val,4);
-					if(val>0){
-						if(parser->pos+(val)<bufsize){
-							unsigned start;
-							parser->pos++;
-							start= parser->pos;
-							parser->pos+= (val-1);
-							if(token!=POPLIBS_POPNBTNULL){
-								token->type= (enum poplibs_popnbttype)cuf;
-								token->value.coords.start= start;
-								token->value.coords.end= parser->pos;
+			if(parser->err==poplibs_popnbterror_none){
+				tok->type= typ;
+				switch(typ){
+					case poplibs_popnbttype_byte:
+						if(parser->pos+1<bufsize){
+							if(tok!=POPLIBS_POPNBTNULL){
+								tok->value.data[0]= buf[parser->pos++];
 							}
+						}else{
+							parser->err= poplibs_popnbterror_part;
+							parser->errPos= parser->pos;
+							parser->pos= start;
+							parser->nexttok--;
 						}
-					}
-				}else{
-					if(parser->err==poplibs_popnbterror_none){
-						parser->err= poplibs_popnbterror_part;
-					}
-					parser->nexttok-= mTok;
-				}
-			}
-			break;
-		case poplibs_popnbttype_string:
-			if((token= popnbt_alloctoken(parser,tokens,tokensize))!=POPLIBS_POPNBTNULL){
-				mTok++;
-				if(incompound){
-					popnbt_applytokname(parser,buf,bufsize,token);
-				}
-				if(parser->err==poplibs_popnbterror_none && parser->pos+2<bufsize){
-					unsigned int val;
-					parser->pos++;
-					popnbt_memcpy(&val,&buf[parser->pos],2);
-					parser->pos++;
-					popnbt_finalizedata(parser,&val,2);
-					if(val>0){
-						if(parser->pos+(val)<bufsize){
-							unsigned start;
-							parser->pos++;
-							start= parser->pos;
-							parser->pos+= (val-1);
-							if(token!=POPLIBS_POPNBTNULL){
-								token->type= (enum poplibs_popnbttype)cuf;
-								token->value.coords.start= start;
-								token->value.coords.end= parser->pos;
+						break;
+					case poplibs_popnbttype_short:
+						if(parser->pos+2<bufsize){
+							if(tok!=POPLIBS_POPNBTNULL){
+								popnbt_memcpy(tok->value.data,&buf[parser->pos],2);
+								popnbt_finalizedata(parser,tok->value.data,2);
+								parser->pos+= 1;
 							}
+						}else{
+							parser->err= poplibs_popnbterror_part;
+							parser->errPos= parser->pos;
+							parser->pos= start;
+							parser->nexttok--;
 						}
-					}
-				}else{
-					if(parser->err==poplibs_popnbterror_none){
-						parser->err= poplibs_popnbterror_part;
-					}
-					parser->nexttok-= mTok;
-				}
-			}
-			break;
-		case poplibs_popnbttype_list:
-			if((token= popnbt_alloctoken(parser,tokens,tokensize))!=POPLIBS_POPNBTNULL){
-				mTok++;
-				if(incompound){
-					popnbt_applytokname(parser,buf,bufsize,token);
-				}
-				if(parser->err==poplibs_popnbterror_none && parser->pos+1<bufsize){
-					char ltype;
-					parser->pos++;
-					ltype=  buf[parser->pos];
-					if(parser->pos+4<bufsize){
-						long val;
-						parser->pos++;
-						popnbt_memcpy(&val,&buf[parser->pos],4);
-						parser->pos+= 3;
-						popnbt_finalizedata(parser,&val,4);
-						if(val>0){
-							if(ltype!=poplibs_popnbttype_end){
-								unsigned i;
-								for(i=0;i<val;i++){
-									unsigned tmade= 0;
-									unsigned cur= parser->pos;
-									popnbt_grabtoken(parser,buf,bufsize,tokens,tokensize,&tmade,0);
-									if(parser->err!=poplibs_popnbterror_none){
-										break;
-									}else if(buf[cur+1]!=ltype){
-										parser->err= poplibs_popnbterror_badid;
-										mTok+= tmade;
-										parser->nexttok-= mTok;
-										break;
+						break;
+					case poplibs_popnbttype_int:
+						if(parser->pos+4<bufsize){
+							if(tok!=POPLIBS_POPNBTNULL){
+								popnbt_memcpy(tok->value.data,&buf[parser->pos],4);
+								popnbt_finalizedata(parser,tok->value.data,4);
+								parser->pos+= 4;
+							}
+						}else{
+							parser->err= poplibs_popnbterror_part;
+							parser->errPos= parser->pos;
+							parser->pos= start;
+							parser->nexttok--;
+						}
+						break;
+					case poplibs_popnbttype_long:
+						if(parser->pos+8<bufsize){
+							if(tok!=POPLIBS_POPNBTNULL){
+								popnbt_memcpy(tok->value.data,&buf[parser->pos],8);
+								popnbt_finalizedata(parser,tok->value.data,8);
+								parser->pos+= 8;
+							}
+						}else{
+							parser->err= poplibs_popnbterror_part;
+							parser->errPos= parser->pos;
+							parser->pos= start;
+							parser->nexttok--;
+						}
+						break;
+					case poplibs_popnbttype_float:
+						if(parser->pos+4<bufsize){
+							if(tok!=POPLIBS_POPNBTNULL){
+								popnbt_memcpy(tok->value.data,&buf[parser->pos],4);
+								popnbt_finalizedata(parser,tok->value.data,4);
+								parser->pos+= 4;
+							}
+						}else{
+							parser->err= poplibs_popnbterror_part;
+							parser->errPos= parser->pos;
+							parser->pos= start;
+							parser->nexttok--;
+						}
+						break;
+					case poplibs_popnbttype_double:
+						if(parser->pos+8<bufsize){
+							if(tok!=POPLIBS_POPNBTNULL){
+								popnbt_memcpy(tok->value.data,&buf[parser->pos],8);
+								popnbt_finalizedata(parser,tok->value.data,8);
+								parser->pos+= 8;
+							}
+						}else{
+							parser->err= poplibs_popnbterror_part;
+							parser->errPos= parser->pos;
+							parser->pos= start;
+							parser->nexttok--;
+						}
+						break;
+					case poplibs_popnbttype_bytearr:
+						if(parser->pos+4<bufsize){
+							long len;
+							popnbt_memcpy(&len,&buf[parser->pos],4);
+							popnbt_finalizedata(parser,&len,4);
+							parser->pos+= 4;
+							if(len>0){
+								if(parser->pos+(len)<bufsize){
+									unsigned start= parser->pos;
+									parser->pos+= len;
+									if(tok!=POPLIBS_POPNBTNULL){
+										tok->value.coords.start= start;
+										tok->value.coords.end= parser->pos-1;
 									}
-									mTok+= tmade;
+								}else{
+									parser->err= poplibs_popnbterror_part;
+									parser->errPos= parser->pos;
+									parser->pos= start;
+									parser->nexttok--;
+								}
+							}else{
+								if(tok!=POPLIBS_POPNBTNULL){
+									tok->value.coords.start= parser->pos;
+									tok->value.coords.end= parser->pos-1;
+								}
+							}
+						}else{
+							parser->err= poplibs_popnbterror_part;
+							parser->errPos= parser->pos;
+							parser->pos= start;
+							parser->nexttok--;
+						}
+						break;
+					case poplibs_popnbttype_string:
+						if(parser->pos+2<bufsize){
+							unsigned short len;
+							popnbt_memcpy(&len,&buf[parser->pos],4);
+							popnbt_finalizedata(parser,&len,4);
+							parser->pos+= 2;
+							if(len>=0){
+								if(parser->pos+len<bufsize){
+									unsigned start= parser->pos;
+									parser->pos+= len;
+									if(tok!=POPLIBS_POPNBTNULL){
+										tok->value.coords.start= start;
+										tok->value.coords.end= parser->pos-1;
+									}
+								}else{
+									parser->err= poplibs_popnbterror_part;
+									parser->errPos= parser->pos;
+									parser->pos= start;
+									parser->nexttok--;
+								}
+							}else{
+								if(tok!=POPLIBS_POPNBTNULL){
+									tok->value.coords.start= parser->pos;
+									tok->value.coords.end= parser->pos-1;
+								}
+							}
+						}else{
+							parser->err= poplibs_popnbterror_part;
+							parser->errPos= parser->pos;
+							parser->pos= start;
+							parser->nexttok--;
+						}
+						break;
+					case poplibs_popnbttype_list:
+						if(parser->pos+5<bufsize){
+							enum poplibs_popnbttype ltyp= buf[parser->pos++];
+							long len;
+							popnbt_memcpy(&len,&buf[parser->pos],4);
+							popnbt_finalizedata(parser,&len,4);
+							parser->pos+= 4;
+							if(len<=0 || ltyp!=poplibs_popnbttype_end){
+								if(len<=0){
+									len= 0;
+								}
+								if(tok!=POPLIBS_POPNBTNULL){
+									tok->value.list.type= ltyp;
+									tok->value.list.items= len;
+									popnbt_stackpush(parser,ltyp,parser->nexttok-1,len);
+								}else{
+									popnbt_stackpush(parser,ltyp,1,len);
 								}
 							}else{
 								parser->err= poplibs_popnbterror_badid;
-								parser->nexttok-= mTok;
+								parser->errPos= parser->pos-4;
+								parser->pos= start;
+								parser->nexttok--;
 							}
+						}else{
+							parser->err= poplibs_popnbterror_part;
+							parser->errPos= parser->pos;
+							parser->pos= start;
+							parser->nexttok--;
 						}
-						if(token!=POPLIBS_POPNBTNULL){
-							token->type= (enum poplibs_popnbttype)cuf;
-							token->value.items= val;
+						break;
+					case poplibs_popnbttype_compound:
+						if(tok!=POPLIBS_POPNBTNULL){
+							popnbt_stackpush(parser,poplibs_popnbttype_end,parser->nexttok-1,0);
+						}else{
+							popnbt_stackpush(parser,poplibs_popnbttype_end,0,0);
 						}
-					}
-				}else{
-					if(parser->err==poplibs_popnbterror_none){
-						parser->err= poplibs_popnbterror_part;
-					}
-					parser->nexttok-= mTok;
-				}
-			}
-			break;
-		case poplibs_popnbttype_compound:
-			if((token= popnbt_alloctoken(parser,tokens,tokensize))!=POPLIBS_POPNBTNULL){
-				mTok++;
-				popnbt_applytokname(parser,buf,bufsize,token);
-				if(parser->err==poplibs_popnbterror_none && parser->pos+1<bufsize){
-					char ltype;
-					unsigned i;
-					parser->pos++;
-					ltype=  buf[parser->pos];
-					while(buf[parser->pos]!=poplibs_popnbttype_end){
-						unsigned tmade= 0;
-						popnbt_grabtoken(parser,buf,bufsize,tokens,tokensize,&tmade,1);
-						if(parser->err!=poplibs_popnbterror_none){
-							break;
-						}
-						mTok+= tmade;
-						i++;
-						parser->pos++;
-					}
-					if(buf[parser->pos]!=poplibs_popnbttype_end){
-						parser->err= poplibs_popnbterror_part;
-						parser->nexttok-= mTok;
-					}
-					parser->pos--;
-					if(token!=POPLIBS_POPNBTNULL){
-						token->type= (enum poplibs_popnbttype)cuf;
-						token->value.items= i;
-					}
-				}else{
-					if(parser->err==poplibs_popnbterror_none){
-						parser->err= poplibs_popnbterror_part;
-					}
-					parser->nexttok-= mTok;
-				}
-			}
-			break;
-		case poplibs_popnbttype_intarr:
-			if((token= popnbt_alloctoken(parser,tokens,tokensize))!=POPLIBS_POPNBTNULL){
-				mTok++;
-				if(incompound){
-					popnbt_applytokname(parser,buf,bufsize,token);
-				}
-				if(parser->err==poplibs_popnbterror_none && parser->pos+4<bufsize){
-					long val;
-					parser->pos++;
-					popnbt_memcpy(&val,&buf[parser->pos],4);
-					parser->pos+= 3;
-					popnbt_finalizedata(parser,&val,4);
-					if(val>0){
-						if(parser->pos+(val*4)<bufsize){
-							unsigned start;
-							parser->pos++;
-							start= parser->pos;
-							parser->pos+= (val-1)*4;
-							if(token!=POPLIBS_POPNBTNULL){
-								token->type= (enum poplibs_popnbttype)cuf;
-								token->value.coords.start= start;
-								token->value.coords.end= parser->pos;
+						break;
+					case poplibs_popnbttype_intarr:
+						if(parser->pos+4<bufsize){
+							long len;
+							popnbt_memcpy(&len,&buf[parser->pos],4);
+							popnbt_finalizedata(parser,&len,4);
+							parser->pos+= 4;
+							if(len>0){
+								if(parser->pos+(len*4)<bufsize){
+									unsigned start= parser->pos;
+									parser->pos+= len*4;
+									if(tok!=POPLIBS_POPNBTNULL){
+										tok->value.coords.start= start;
+										tok->value.coords.end= parser->pos-1;
+									}
+								}else{
+									parser->err= poplibs_popnbterror_part;
+									parser->errPos= parser->pos;
+									parser->pos= start;
+									parser->nexttok--;
+								}
+							}else{
+								if(tok!=POPLIBS_POPNBTNULL){
+									tok->value.coords.start= parser->pos;
+									tok->value.coords.end= parser->pos-1;
+								}
 							}
+						}else{
+							parser->err= poplibs_popnbterror_part;
+							parser->errPos= parser->pos;
+							parser->pos= start;
+							parser->nexttok--;
 						}
-					}
-				}else{
-					if(parser->err==poplibs_popnbterror_none){
-						parser->err= poplibs_popnbterror_part;
-					}
-					parser->nexttok-= mTok;
-				}
-			}
-			break;
-		case poplibs_popnbttype_longarr:
-			if((token= popnbt_alloctoken(parser,tokens,tokensize))!=POPLIBS_POPNBTNULL){
-				mTok++;
-				if(incompound){
-					popnbt_applytokname(parser,buf,bufsize,token);
-				}
-				if(parser->err==poplibs_popnbterror_none && parser->pos+4<bufsize){
-					long val;
-					parser->pos++;
-					popnbt_memcpy(&val,&buf[parser->pos],4);
-					parser->pos+= 3;
-					popnbt_finalizedata(parser,&val,4);
-					if(val>0){
-						if(parser->pos+(val*8)<bufsize){
-							unsigned start;
-							parser->pos++;
-							start= parser->pos;
-							parser->pos+= (val-1)*8;
-							if(token!=POPLIBS_POPNBTNULL){
-								token->type= (enum poplibs_popnbttype)cuf;
-								token->value.coords.start= start;
-								token->value.coords.end= parser->pos;
+						break;
+					case poplibs_popnbttype_longarr:
+						if(parser->pos+4<bufsize){
+							long len;
+							popnbt_memcpy(&len,&buf[parser->pos],4);
+							popnbt_finalizedata(parser,&len,4);
+							parser->pos+= 4;
+							if(len>0){
+								if(parser->pos+(len*8)<bufsize){
+									unsigned start= parser->pos;
+									parser->pos+= len*8;
+									if(tok!=POPLIBS_POPNBTNULL){
+										tok->value.coords.start= start;
+										tok->value.coords.end= parser->pos-1;
+									}
+								}else{
+									parser->err= poplibs_popnbterror_part;
+									parser->errPos= parser->pos;
+									parser->pos= start;
+									parser->nexttok--;
+								}
+							}else{
+								if(tok!=POPLIBS_POPNBTNULL){
+									tok->value.coords.start= parser->pos;
+									tok->value.coords.end= parser->pos-1;
+								}
 							}
+						}else{
+							parser->err= poplibs_popnbterror_part;
+							parser->errPos= parser->pos;
+							parser->pos= start;
+							parser->nexttok--;
+						}
+						break;
+					default:
+						parser->err= poplibs_popnbterror_badid;
+						parser->errPos= parser->pos;
+						parser->pos= start;
+						parser->nexttok--;
+						break;
+				}
+				if(parser->err==poplibs_popnbterror_none){
+					if(sitem!=POPLIBS_POPNBTNULL){
+						if(parser->tokens!=POPLIBS_POPNBTNULL){
+							poplibs_popnbttoken_t *ntok= &parser->tokens[sitem->id];
+							if(ntok->type==poplibs_popnbttype_compound){
+								ntok->value.items++;
+							}
+						}else if(sitem->id==0){
+							sitem->count++;
+						}else if(sitem->id==1){
+							sitem->count--;
 						}
 					}
-				}else{
-					if(parser->err==poplibs_popnbterror_none){
-						parser->err= poplibs_popnbterror_part;
-					}
-					parser->nexttok-= mTok;
+					rtn= tok;
 				}
+			}else{
+				parser->errPos= parser->pos;
+				parser->pos= start;
 			}
-			break;
-		default:
-			parser->err= poplibs_popnbterror_badid;
-			parser->nexttok-= mTok;
-			parser->pos++;
-			break;
+		}else{
+			parser->err= poplibs_popnbterror_nostack;
+			parser->errPos= parser->pos;
+			parser->pos= start;
+		}
 	}
-	if(parser->err==poplibs_popnbterror_none){
-		*made+= mTok;
+	return rtn;
+}
+
+POPLIBS_POPNBTAPI unsigned poplibs_popnbtparser_parse(poplibs_popnbtparser *parser,const void *vbuf,const unsigned bufsize){
+	unsigned rtn= 0;
+	parser->err= poplibs_popnbterror_none;
+	while((parser->err==poplibs_popnbterror_none || parser->err==poplibs_popnbterror_endtok) && parser->pos<bufsize){
+		poplibs_popnbtparser_parsetoken(parser,vbuf,bufsize);
+		if(parser->err==poplibs_popnbterror_none){
+			rtn++;
+		}
 	}
+	if((parser->err==poplibs_popnbterror_none || parser->err==poplibs_popnbterror_endtok) && parser->nextstack>=0){
+		parser->err= poplibs_popnbterror_part;
+		parser->errPos= parser->pos;
+	}else if(parser->err==poplibs_popnbterror_endtok){
+		parser->err= poplibs_popnbterror_none;
+	}
+	return rtn;
+}
+
+POPLIBS_POPNBTAPI void poplibs_popnbtparser_updatestack(poplibs_popnbtparser *parser,poplibs_popnbtstack *stack,const unsigned stacksize){
+	parser->stack= stack;
+	parser->stacksize= stacksize;
 	return;
 }
 
-POPLIBS_POPNBTAPI unsigned poplibs_popnbtparser_parse(poplibs_popnbtparser *parser,const char *buf,const unsigned bufsize,poplibs_popnbttoken_t *tokens,const unsigned tokensize){
-	char cuf= '\0';
-	unsigned made= 0;
-	unsigned start= parser->pos;
-	parser->err= poplibs_popnbterror_none;
-	for(;parser->pos<bufsize;parser->pos++){
-		cuf= buf[parser->pos];
-		popnbt_grabtoken(parser,buf,bufsize,tokens,tokensize,&made,0);
-		if(parser->err!=poplibs_popnbterror_none){
-			parser->errPos= parser->pos;
-			parser->pos= start;
-			break;
-		}
-		start= parser->pos;
-	}
-	return made;
+POPLIBS_POPNBTAPI void poplibs_popnbtparser_updatetokens(poplibs_popnbtparser *parser,poplibs_popnbttoken_t *tokens,const unsigned tokensize){
+	parser->tokens= tokens;
+	parser->toksize= tokensize;
+	return;
 }
 
-POPLIBS_POPNBTAPI void poplibs_popnbtparser_init(poplibs_popnbtparser *parser,const int bigendian){
+POPLIBS_POPNBTAPI void poplibs_popnbtparser_init(poplibs_popnbtparser *parser,const int bigendian,poplibs_popnbtstack *stack,const unsigned stacksize,poplibs_popnbttoken_t *tokens,const unsigned tokensize){
+	parser->stack= stack;
+	parser->tokens= tokens;
 	parser->err= poplibs_popnbterror_none;
-	parser->errPos= 0;
+	parser->stacksize= stacksize;
+	parser->toksize= tokensize;
+	parser->nextstack= -1;
 	parser->nexttok= 0;
 	parser->pos= 0;
+	parser->errPos= 0;
 	parser->bigendian= bigendian;
 	return;
 }
